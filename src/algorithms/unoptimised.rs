@@ -1,9 +1,14 @@
-use std::{borrow::Cow, collections::HashMap};
-
 use crate::{Correctness, Guess, Guesser, DICTIONARY};
+use std::{borrow::Cow, collections::HashMap};
 
 pub struct Unoptimised {
     remaining: HashMap<&'static str, usize>,
+}
+
+impl Default for Unoptimised {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Unoptimised {
@@ -56,7 +61,7 @@ impl Guesser for Unoptimised {
         // the best word
         let mut best: Option<Candidate> = None;
 
-        for (&word, _) in &self.remaining {
+        for &word in self.remaining.keys() {
             let mut sum = 0.0;
 
             for pattern in Correctness::patterns() {

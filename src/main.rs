@@ -1,5 +1,5 @@
 use clap::{ArgEnum, Parser};
-use wordle_solver::Guesser;
+use wordle_solver::{algorithms, Guesser};
 
 const GAMES: &str = include_str!("../answers.txt");
 
@@ -32,27 +32,27 @@ enum Implementation {
 fn main() {
     let args = Args::parse();
     match args.implementation {
-        Implementation::Unoptimised => play(wordle_solver::algorithms::Unoptimised::new, args.max),
-        Implementation::Allocs => play(wordle_solver::algorithms::Allocs::new, args.max),
-        Implementation::Vecrem => play(wordle_solver::algorithms::Vecrem::new, args.max),
-        Implementation::Once => play(wordle_solver::algorithms::OnceInit::new, args.max),
-        Implementation::Precalc => play(wordle_solver::algorithms::Precalc::new, args.max),
-        Implementation::Weight => play(wordle_solver::algorithms::Weight::new, args.max),
-        Implementation::Cutoff => play(wordle_solver::algorithms::Cutoff::new, args.max),
-        Implementation::Enumerate => play(wordle_solver::algorithms::Enumerate::new, args.max),
-        Implementation::Popular => play(wordle_solver::algorithms::Popular::new, args.max),
+        Implementation::Unoptimised => play::<algorithms::Unoptimised>(args.max),
+        Implementation::Allocs => play::<algorithms::Allocs>(args.max),
+        Implementation::Vecrem => play::<algorithms::Vecrem>(args.max),
+        Implementation::Once => play::<algorithms::OnceInit>(args.max),
+        Implementation::Precalc => play::<algorithms::Precalc>(args.max),
+        Implementation::Weight => play::<algorithms::Weight>(args.max),
+        Implementation::Cutoff => play::<algorithms::Cutoff>(args.max),
+        Implementation::Enumerate => play::<algorithms::Enumerate>(args.max),
+        Implementation::Popular => play::<algorithms::Popular>(args.max),
     }
 }
 
-fn play<G>(mut mk: impl FnMut() -> G, max: Option<usize>)
+fn play<G>(max: Option<usize>)
 where
-    G: Guesser,
+    G: Guesser + Default,
 {
     let w = wordle_solver::Wordle::new();
     let mut score = 0;
     let mut games = 0;
     for answer in GAMES.split_whitespace().take(max.unwrap_or(usize::MAX)) {
-        let guesser = (mk)();
+        let guesser = G::default();
         if let Some(s) = w.play(answer, guesser) {
             games += 1;
             score += s;

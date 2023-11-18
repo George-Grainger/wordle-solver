@@ -6,6 +6,12 @@ pub struct Allocs {
     remaining: HashMap<&'static str, usize>,
 }
 
+impl Default for Allocs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Allocs {
     pub fn new() -> Self {
         Allocs {
@@ -43,7 +49,7 @@ impl Guesser for Allocs {
         // the best word
         let mut best: Option<Candidate> = None;
 
-        for (&word, _) in &self.remaining {
+        for &word in self.remaining.keys() {
             let mut sum = 0.0;
 
             for pattern in Correctness::patterns() {

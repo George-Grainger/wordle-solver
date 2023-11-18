@@ -8,6 +8,12 @@ pub struct Wordle {
     dictionary: HashSet<&'static str>,
 }
 
+impl Default for Wordle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Wordle {
     pub fn new() -> Self {
         Self {
@@ -219,7 +225,7 @@ mod tests {
                 if history.len() == 1 {
                     return "right".to_string();
                 }
-                return "wrong".to_string();
+                "wrong".to_string()
             });
 
             assert_eq!(w.play("right", guesser), Some(2));
@@ -232,7 +238,7 @@ mod tests {
                 if history.len() == 2 {
                     return "right".to_string();
                 }
-                return "wrong".to_string();
+                "wrong".to_string()
             });
 
             assert_eq!(w.play("right", guesser), Some(3));
@@ -245,7 +251,7 @@ mod tests {
                 if history.len() == 3 {
                     return "right".to_string();
                 }
-                return "wrong".to_string();
+                "wrong".to_string()
             });
 
             assert_eq!(w.play("right", guesser), Some(4));
@@ -258,7 +264,7 @@ mod tests {
                 if history.len() == 4 {
                     return "right".to_string();
                 }
-                return "wrong".to_string();
+                "wrong".to_string()
             });
 
             assert_eq!(w.play("right", guesser), Some(5));
@@ -271,7 +277,7 @@ mod tests {
                 if history.len() == 5 {
                     return "right".to_string();
                 }
-                return "wrong".to_string();
+                "wrong".to_string()
             });
 
             assert_eq!(w.play("right", guesser), Some(6));

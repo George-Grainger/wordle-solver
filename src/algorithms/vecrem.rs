@@ -1,9 +1,14 @@
-use std::borrow::Cow;
-
 use crate::{Correctness, Guess, Guesser, DICTIONARY};
+use std::borrow::Cow;
 
 pub struct Vecrem {
     remaining: Vec<(&'static str, usize)>,
+}
+
+impl Default for Vecrem {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Vecrem {
