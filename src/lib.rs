@@ -131,38 +131,9 @@ pub struct Guess<'a> {
 
 impl Guess<'_> {
     pub fn matches(&self, word: &str) -> bool {
-        // Check if the guess would be possible to observe when `word` is the correct answer.
-        // This is equivalent to
-        //     Correctness::compute(word, &self.word) == self.mask
-        // without _necessarily_ computing the full mask for the tested word
-        assert_eq!(word.len(), 5);
-        assert_eq!(self.word.len(), 5);
-
-        // Check Correct letters
-        let mut used = [false; 5];
-        for (i, (a, g)) in word.bytes().zip(self.word.bytes()).enumerate() {
-            if a == g {
-                if self.mask[i] != Correctness::Correct {
-                    return false;
-                }
-                used[i] = true;
-            } else if self.mask[i] == Correctness::Correct {
-                return false;
-            }
-        }
-
-        // Check Misplaced letters
-        for (g, e) in self.word.bytes().zip(self.mask.iter()) {
-            if *e == Correctness::Correct {
-                continue;
-            }
-            if Correctness::is_misplaced(g, word, &mut used) != (*e == Correctness::Misplaced) {
-                return false;
-            }
-        }
-
-        // The rest will be all correctly Wrong letters
-        true
+        // If guess G gives mask C against answer A, then
+        // guess A should also give mask C against answer G
+        Correctness::compute(word, &self.word) == self.mask
     }
 }
 
@@ -239,6 +210,7 @@ mod tests {
             check!("baaaa" + [W C M W W] allows "aaccc");
             check!("baaaa" + [W C M W W] disallows "caacc");
             check!("aaabb" + [C M W W W] disallows "accaa");
+            check!("tares" + [W M M W W] disallows "brink");
         }
     }
 
