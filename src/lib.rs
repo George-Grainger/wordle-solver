@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{borrow::Cow, collections::HashSet};
 
 pub mod algorithms;
 
@@ -37,7 +37,7 @@ impl Wordle {
 
             let correctness = Correctness::compute(answer, &guess);
             history.push(Guess {
-                word: guess,
+                word: Cow::Owned(guess),
                 mask: correctness,
             });
         }
@@ -56,8 +56,8 @@ pub enum Correctness {
 }
 
 impl Correctness {
-    fn is_misplaced(letter: char, answer: &str, used: &mut [bool; 5]) -> bool {
-        answer.chars().enumerate().any(|(i, a)| {
+    fn is_misplaced(letter: u8, answer: &str, used: &mut [bool; 5]) -> bool {
+        answer.bytes().enumerate().any(|(i, a)| {
             if a == letter && !used[i] {
                 used[i] = true;
                 return true;
@@ -73,7 +73,7 @@ impl Correctness {
         let mut c = [Correctness::Wrong; 5];
 
         // Mark things green
-        for (i, (a, g)) in answer.chars().zip(guess.chars()).enumerate() {
+        for (i, (a, g)) in answer.bytes().zip(guess.bytes()).enumerate() {
             if a == g {
                 c[i] = Correctness::Correct;
             }
@@ -86,12 +86,12 @@ impl Correctness {
                 used[i] = true;
             }
         }
-        for (i, g) in guess.chars().enumerate() {
+        for (i, g) in guess.bytes().enumerate() {
             if c[i] == Correctness::Correct {
                 // Already marked as green
                 continue;
             }
-            if answer.chars().enumerate().any(|(j, a)| {
+            if answer.bytes().enumerate().any(|(j, a)| {
                 if a == g && !used[j] {
                     used[j] = true;
                     return true;
@@ -124,12 +124,12 @@ impl Correctness {
     }
 }
 
-pub struct Guess {
-    pub word: String,
+pub struct Guess<'a> {
+    pub word: Cow<'a, str>,
     pub mask: [Correctness; 5],
 }
 
-impl Guess {
+impl Guess<'_> {
     pub fn matches(&self, word: &str) -> bool {
         // Check if the guess would be possible to observe when `word` is the correct answer.
         // This is equivalent to
@@ -137,10 +137,10 @@ impl Guess {
         // without _necessarily_ computing the full mask for the tested word
         assert_eq!(word.len(), 5);
         assert_eq!(self.word.len(), 5);
-        let mut used = [false; 5];
 
         // Check Correct letters
-        for (i, (a, g)) in word.chars().zip(self.word.chars()).enumerate() {
+        let mut used = [false; 5];
+        for (i, (a, g)) in word.bytes().zip(self.word.bytes()).enumerate() {
             if a == g {
                 if self.mask[i] != Correctness::Correct {
                     return false;
@@ -152,7 +152,7 @@ impl Guess {
         }
 
         // Check Misplaced letters
-        for (g, e) in self.word.chars().zip(self.mask.iter()) {
+        for (g, e) in self.word.bytes().zip(self.mask.iter()) {
             if *e == Correctness::Correct {
                 continue;
             }
@@ -210,19 +210,20 @@ mod tests {
 
     mod guess_matcher {
         use crate::Guess;
+        use std::borrow::Cow;
 
         /// checks if a Guess matches a word
         /// Ex. `check!("abcde" + [C C C C C] allows "abcde");`
         macro_rules! check {
             ($prev:literal + [$($mask:tt)+] allows $next:literal) => {
                 assert!(Guess {
-                    word: $prev.to_string(),
+                    word: Cow::Borrowed($prev),
                     mask: mask![$($mask )+]
                 }.matches($next));
             };
             ($prev:literal + [$($mask:tt)+] disallows $next:literal) => {
                 assert!(!Guess {
-                    word: $prev.to_string(),
+                    word: Cow::Borrowed($prev),
                     mask: mask![$($mask )+]
                 }.matches($next));
             }

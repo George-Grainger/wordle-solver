@@ -2,13 +2,13 @@ use std::{borrow::Cow, collections::HashMap};
 
 use crate::{Correctness, Guess, Guesser, DICTIONARY};
 
-pub struct Unoptimised {
+pub struct Allocs {
     remaining: HashMap<&'static str, usize>,
 }
 
-impl Unoptimised {
+impl Allocs {
     pub fn new() -> Self {
-        Unoptimised {
+        Allocs {
             remaining: HashMap::from_iter(DICTIONARY.lines().map(|line| {
                 let (word, count) = line
                     .split_once(' ')
@@ -26,7 +26,7 @@ struct Candidate {
     goodness: f64,
 }
 
-impl Guesser for Unoptimised {
+impl Guesser for Allocs {
     /// An unoptimized guessing algorithm for wordle.
     /// We Need to find the 'goodness' score of each word remaining and then return the one
     /// with the highest goodness. We'll use information theory to compute the expected
@@ -71,7 +71,7 @@ impl Guesser for Unoptimised {
                     // considering a "world" where we did guess "word" and got "pattern" as the
                     // correctness. Now compute what _then_ is left
                     let g = Guess {
-                        word: Cow::Owned(word.to_string()),
+                        word: Cow::Borrowed(word),
                         mask: pattern,
                     };
                     if g.matches(candidate) {
