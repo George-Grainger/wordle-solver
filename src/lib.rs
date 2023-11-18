@@ -61,18 +61,12 @@ impl Correctness {
         assert_eq!(guess.len(), 5);
 
         let mut c = [Correctness::Wrong; 5];
+        let mut used = [false; 5];
 
         // Mark things green
         for (i, (a, g)) in answer.bytes().zip(guess.bytes()).enumerate() {
             if a == g {
                 c[i] = Correctness::Correct;
-            }
-        }
-
-        // Mark things yellow
-        let mut used = [false; 5];
-        for (i, &c) in c.iter().enumerate() {
-            if c == Correctness::Correct {
                 used[i] = true;
             }
         }
