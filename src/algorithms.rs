@@ -17,3 +17,7 @@ mod enumerate;
 pub use enumerate::Enumerate;
 mod popular;
 pub use popular::Popular;
+mod sigmoid;
+pub use sigmoid::Sigmoid;
+mod cache;
+pub use cache::Cache;

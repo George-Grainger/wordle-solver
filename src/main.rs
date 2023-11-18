@@ -27,6 +27,8 @@ enum Implementation {
     Cutoff,
     Enumerate,
     Popular,
+    Sigmoid,
+    Cache,
 }
 
 fn main() {
@@ -41,6 +43,8 @@ fn main() {
         Implementation::Cutoff => play::<algorithms::Cutoff>(args.games),
         Implementation::Enumerate => play::<algorithms::Enumerate>(args.games),
         Implementation::Popular => play::<algorithms::Popular>(args.games),
+        Implementation::Sigmoid => play::<algorithms::Sigmoid>(args.games),
+        Implementation::Cache => play::<algorithms::Cache>(args.games),
     }
 }
 
