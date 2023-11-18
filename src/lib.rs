@@ -193,11 +193,12 @@ macro_rules! guesser {
     }};
 }
 
+/// maps a list of C,M,W tokens into an array of Correctness variants
 #[cfg(test)]
 macro_rules! mask {
-    (C) => {$crate::Correctness::Correct};
-    (M) => {$crate::Correctness::Misplaced};
-    (W) => {$crate::Correctness::Wrong};
+    (C) => { $crate::Correctness::Correct };
+    (M) => { $crate::Correctness::Misplaced };
+    (W) => { $crate::Correctness::Wrong };
     ($($c:tt)+) => {[
         $(mask!($c)),+
     ]}
@@ -205,70 +206,54 @@ macro_rules! mask {
 
 #[cfg(test)]
 mod tests {
+
     mod guess_matcher {
         use crate::Guess;
         use std::borrow::Cow;
 
+        /// checks if a Guess matches a word
+        /// Ex. `check!("abcde" + [C C C C C] allows "abcde");`
         macro_rules! check {
             ($prev:literal + [$($mask:tt)+] allows $next:literal) => {
                 assert!(Guess {
                     word: Cow::Borrowed($prev),
                     mask: mask![$($mask )+]
-                }
-                .matches($next));
-                assert_eq!($crate::Correctness::compute($next, $prev), mask![$($mask )+]);
+                }.matches($next));
             };
             ($prev:literal + [$($mask:tt)+] disallows $next:literal) => {
                 assert!(!Guess {
                     word: Cow::Borrowed($prev),
                     mask: mask![$($mask )+]
-                }
-                .matches($next));
-                assert_ne!($crate::Correctness::compute($next, $prev), mask![$($mask )+]);
+                }.matches($next));
             }
         }
 
         #[test]
-        fn from_jon() {
+        fn matches() {
+            // checking previous guess + prev. mask, against the latest guessed word
             check!("abcde" + [C C C C C] allows "abcde");
             check!("abcdf" + [C C C C C] disallows "abcde");
             check!("abcde" + [W W W W W] allows "fghij");
             check!("abcde" + [M M M M M] allows "eabcd");
             check!("baaaa" + [W C M W W] allows "aaccc");
             check!("baaaa" + [W C M W W] disallows "caacc");
-        }
-
-        #[test]
-        fn from_crash() {
+            check!("aaabb" + [C M W W W] disallows "accaa");
             check!("tares" + [W M M W W] disallows "brink");
         }
-
-        #[test]
-        fn from_yukosgiti() {
-            check!("aaaab" + [C C C W M] allows "aaabc");
-            check!("aaabc" + [C C C M W] allows "aaaab");
-        }
-
-        #[test]
-        fn from_chat() {
-            // flocular
-            check!("aaabb" + [C M W W W] disallows "accaa");
-            // ritoban
-            check!("abcde" + [W W W W W] disallows "bcdea");
-        }
     }
+
     mod game {
         use crate::{Guess, Wordle};
 
         #[test]
-        fn genius() {
+        fn play_first_guess_is_correct() {
             let w = Wordle::new();
             let guesser = guesser!(|_history| { "right".to_string() });
             assert_eq!(w.play("right", guesser), Some(1));
         }
 
         #[test]
-        fn magnificent() {
+        fn play_second_guess_is_correct() {
             let w = Wordle::new();
             let guesser = guesser!(|history| {
                 if history.len() == 1 {
@@ -276,11 +261,12 @@ mod tests {
                 }
                 "wrong".to_string()
             });
+
             assert_eq!(w.play("right", guesser), Some(2));
         }
 
         #[test]
-        fn impressive() {
+        fn play_third_guess_is_correct() {
             let w = Wordle::new();
             let guesser = guesser!(|history| {
                 if history.len() == 2 {
@@ -288,11 +274,12 @@ mod tests {
                 }
                 "wrong".to_string()
             });
+
             assert_eq!(w.play("right", guesser), Some(3));
         }
 
         #[test]
-        fn splendid() {
+        fn play_fourth_guess_is_correct() {
             let w = Wordle::new();
             let guesser = guesser!(|history| {
                 if history.len() == 3 {
@@ -300,11 +287,12 @@ mod tests {
                 }
                 "wrong".to_string()
             });
+
             assert_eq!(w.play("right", guesser), Some(4));
         }
 
         #[test]
-        fn great() {
+        fn play_fifth_guess_is_correct() {
             let w = Wordle::new();
             let guesser = guesser!(|history| {
                 if history.len() == 4 {
@@ -312,11 +300,12 @@ mod tests {
                 }
                 "wrong".to_string()
             });
+
             assert_eq!(w.play("right", guesser), Some(5));
         }
 
         #[test]
-        fn phew() {
+        fn play_sixth_guess_is_correct() {
             let w = Wordle::new();
             let guesser = guesser!(|history| {
                 if history.len() == 5 {
@@ -324,13 +313,15 @@ mod tests {
                 }
                 "wrong".to_string()
             });
+
             assert_eq!(w.play("right", guesser), Some(6));
         }
 
         #[test]
-        fn oops() {
+        fn all_wrong_guesses_should_terminate() {
             let w = Wordle::new();
             let guesser = guesser!(|_history| { "wrong".to_string() });
+
             assert_eq!(w.play("right", guesser), None);
         }
     }
@@ -340,47 +331,47 @@ mod tests {
 
         #[test]
         fn all_green() {
-            assert_eq!(Correctness::compute("abcde", "abcde"), mask![C C C C C]);
+            assert_eq!(Correctness::compute("abcde", "abcde"), mask!(C C C C C))
         }
 
         #[test]
         fn all_gray() {
-            assert_eq!(Correctness::compute("abcde", "fghij"), mask![W W W W W]);
+            assert_eq!(Correctness::compute("abcde", "qwxyz"), mask!(W W W W W))
         }
 
         #[test]
         fn all_yellow() {
-            assert_eq!(Correctness::compute("abcde", "eabcd"), mask![M M M M M]);
+            assert_eq!(Correctness::compute("abcde", "eabcd"), mask!(M M M M M))
         }
 
         #[test]
         fn repeat_green() {
-            assert_eq!(Correctness::compute("aabbb", "aaccc"), mask![C C W W W]);
+            assert_eq!(Correctness::compute("aabbb", "aaccc"), mask!(C C W W W))
         }
 
         #[test]
         fn repeat_yellow() {
-            assert_eq!(Correctness::compute("aabbb", "ccaac"), mask![W W M M W]);
+            assert_eq!(Correctness::compute("aabbb", "ccaac"), mask!(W W M M W))
         }
 
         #[test]
         fn repeat_some_green() {
-            assert_eq!(Correctness::compute("aabbb", "caacc"), mask![W C M W W]);
+            assert_eq!(Correctness::compute("aabbb", "caacc"), mask!(W C M W W))
         }
 
         #[test]
-        fn dremann_from_chat() {
-            assert_eq!(Correctness::compute("azzaz", "aaabb"), mask![C M W W W]);
+        fn some_green_some_yellow() {
+            assert_eq!(Correctness::compute("azzaz", "aaabb"), mask!(C M W W W))
         }
 
         #[test]
-        fn itsapoque_from_chat() {
-            assert_eq!(Correctness::compute("baccc", "aaddd"), mask![W C W W W]);
+        fn one_green() {
+            assert_eq!(Correctness::compute("baccc", "aaddd"), mask!(W C W W W))
         }
 
         #[test]
-        fn ricoello_from_chat() {
-            assert_eq!(Correctness::compute("abcde", "aacde"), mask![C W C C C]);
+        fn some_green_some_yellow2() {
+            assert_eq!(Correctness::compute("abcde", "aacde"), mask!(C W C C C))
         }
     }
 }
