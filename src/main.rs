@@ -7,12 +7,12 @@ const GAMES: &str = include_str!("../answers.txt");
 #[clap(author, version, about, long_about = None)]
 struct Args {
     /// Name of the wordle guesser implementation to use
-    #[clap(short, long, arg_enum)]
+    #[clap(short, long, arg_enum, default_value = "cutoff")]
     implementation: Implementation,
 
     /// max Number of games to play
     #[clap(short, long)]
-    max: Option<usize>,
+    games: Option<usize>,
 }
 
 /// various Worlde guesser implementations
@@ -32,34 +32,34 @@ enum Implementation {
 fn main() {
     let args = Args::parse();
     match args.implementation {
-        Implementation::Unoptimised => play::<algorithms::Unoptimised>(args.max),
-        Implementation::Allocs => play::<algorithms::Allocs>(args.max),
-        Implementation::Vecrem => play::<algorithms::Vecrem>(args.max),
-        Implementation::Once => play::<algorithms::OnceInit>(args.max),
-        Implementation::Precalc => play::<algorithms::Precalc>(args.max),
-        Implementation::Weight => play::<algorithms::Weight>(args.max),
-        Implementation::Cutoff => play::<algorithms::Cutoff>(args.max),
-        Implementation::Enumerate => play::<algorithms::Enumerate>(args.max),
-        Implementation::Popular => play::<algorithms::Popular>(args.max),
+        Implementation::Unoptimised => play::<algorithms::Unoptimised>(args.games),
+        Implementation::Allocs => play::<algorithms::Allocs>(args.games),
+        Implementation::Vecrem => play::<algorithms::Vecrem>(args.games),
+        Implementation::Once => play::<algorithms::OnceInit>(args.games),
+        Implementation::Precalc => play::<algorithms::Precalc>(args.games),
+        Implementation::Weight => play::<algorithms::Weight>(args.games),
+        Implementation::Cutoff => play::<algorithms::Cutoff>(args.games),
+        Implementation::Enumerate => play::<algorithms::Enumerate>(args.games),
+        Implementation::Popular => play::<algorithms::Popular>(args.games),
     }
 }
 
-fn play<G>(max: Option<usize>)
+fn play<G>(games: Option<usize>)
 where
     G: Guesser + Default,
 {
     let w = wordle_solver::Wordle::new();
     let mut score = 0;
-    let mut games = 0;
-    for answer in GAMES.split_whitespace().take(max.unwrap_or(usize::MAX)) {
+    let mut played = 0;
+    for answer in GAMES.split_whitespace().take(games.unwrap_or(usize::MAX)) {
         let guesser = G::default();
         if let Some(s) = w.play(answer, guesser) {
-            games += 1;
+            played += 1;
             score += s;
             println!("guessed '{}' in {}", &answer, s);
         } else {
             eprintln!("failed to guess.. exiting!");
         }
     }
-    println!("average score: {:.2}", score as f64 / games as f64);
+    println!("average score: {:.2}", score as f64 / played as f64);
 }
