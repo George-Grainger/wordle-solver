@@ -23,6 +23,7 @@ enum Implementation {
     Vecrem,
     Once,
     Precalc,
+    Weight,
 }
 
 fn main() {
@@ -33,6 +34,7 @@ fn main() {
         Implementation::Vecrem => play(wordle_solver::algorithms::Vecrem::new, args.max),
         Implementation::Once => play(wordle_solver::algorithms::OnceInit::new, args.max),
         Implementation::Precalc => play(wordle_solver::algorithms::Precalc::new, args.max),
+        Implementation::Weight => play(wordle_solver::algorithms::Weight::new, args.max),
     }
 }
 
@@ -41,12 +43,17 @@ where
     G: Guesser,
 {
     let w = wordle_solver::Wordle::new();
+    let mut score = 0;
+    let mut games = 0;
     for answer in GAMES.split_whitespace().take(max.unwrap_or(usize::MAX)) {
         let guesser = (mk)();
-        if let Some(score) = w.play(answer, guesser) {
-            println!("guessed '{}' in {}", &answer, score);
+        if let Some(s) = w.play(answer, guesser) {
+            games += 1;
+            score += s;
+            println!("guessed '{}' in {}", &answer, s);
         } else {
             eprintln!("failed to guess.. exiting!");
         }
     }
+    println!("average score: {:.2}", score as f64 / games as f64);
 }
