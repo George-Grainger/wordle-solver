@@ -1,63 +1,194 @@
+use std::borrow::Cow;
+
 use clap::{ArgEnum, Parser};
-use wordle_solver::{algorithms, Guesser};
+use wordle_solver::{Guesser, Solver};
 
 const GAMES: &str = include_str!("../answers.txt");
+
+#[global_allocator]
+static GLOBAL_ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    #[clap(short, long, arg_enum, default_value = "cache")]
-    implementation: Implementation,
+    /// By default, counts will be smoothed using a sigmoid. This flag disables that.
+    #[clap(long)]
+    no_sigmoid: bool,
 
-    #[clap(short, long)]
+    /// Set how candidates are ranked at each step of the solver.
+    ///
+    /// By default, candidates will be ranked based on expected score.
+    #[clap(short, long, arg_enum, default_value = "expected-score")]
+    rank_by: Rank,
+
+    /// By default, correcness computation are cached. This flag disables that.
+    #[clap(long)]
+    no_cache: bool,
+
+    /// By default, only the most likely 1/3 of candidates are considered at each step. This flag
+    /// disables that pruning behavior.
+    #[clap(long)]
+    no_cutoff: bool,
+
+    /// By default, all games are played in "hard mode" where known-incorrect guesses are
+    /// disallowed. This flag allows arbitrary guesses at every step, which allows for more optimal
+    /// guessing, but also increases the search space.
+    #[clap(long)]
+    easy: bool,
+
+    /// The number of games to run.
+    ///
+    /// If not passed, all Wordle games are run.
+    #[clap(short, long, conflicts_with = "interactive")]
     games: Option<usize>,
+
+    /// Launch in interactive mode.
+    ///
+    /// This mode is intended for helping you play the game elsewhere. The program will tell you what word to guess next, and ask you for what combination of correct/misplaced/incorrect you got in return.
+    #[clap(short, long, conflicts_with = "games")]
+    interactive: bool,
 }
 
 #[derive(ArgEnum, Debug, Clone, Copy)]
-enum Implementation {
-    Unoptimised,
-    Allocs,
-    Vecrem,
-    Precalc,
-    Weight,
-    Enum,
-    Cutoff,
-    Sigmoid,
-    Escore,
-    Popular,
-    Cache,
+enum Rank {
+    /// Just pick the first candidate.
+    First,
+
+    /// E[score] = p(word) * (score + 1) + (1 - p(word)) * (score + E[guesses](entropy - E[information]))
+    ExpectedScore,
+
+    /// p(word) * E[information]
+    WeightedInformation,
+
+    /// p(word) + E[information]
+    InfoPlusProbability,
+
+    /// E[information]
+    ExpectedInformation,
 }
 
 fn main() {
     let args = Args::parse();
 
-    match args.implementation {
-        Implementation::Unoptimised => play::<algorithms::Unoptimised>(args.games),
-        Implementation::Allocs => play::<algorithms::Allocs>(args.games),
-        Implementation::Vecrem => play::<algorithms::Vecrem>(args.games),
-        Implementation::Precalc => play::<algorithms::Precalc>(args.games),
-        Implementation::Weight => play::<algorithms::Weight>(args.games),
-        Implementation::Enum => play::<algorithms::Enumerate>(args.games),
-        Implementation::Cutoff => play::<algorithms::Cutoff>(args.games),
-        Implementation::Sigmoid => play::<algorithms::Sigmoid>(args.games),
-        Implementation::Escore => play::<algorithms::Escore>(args.games),
-        Implementation::Popular => play::<algorithms::Popular>(args.games),
-        Implementation::Cache => play::<algorithms::Cached>(args.games),
+    let mut solver = Solver::builder();
+    if args.no_cache {
+        solver.cache = false;
+    }
+    if args.no_cutoff {
+        solver.cutoff = false;
+    }
+    if args.no_sigmoid {
+        solver.sigmoid = false;
+    }
+    if args.easy {
+        solver.hard_mode = false;
+    }
+    solver.rank_by = match args.rank_by {
+        Rank::First => wordle_solver::Rank::First,
+        Rank::ExpectedScore => wordle_solver::Rank::ExpectedScore,
+        Rank::WeightedInformation => wordle_solver::Rank::WeightedInformation,
+        Rank::InfoPlusProbability => wordle_solver::Rank::InfoPlusProbability,
+        Rank::ExpectedInformation => wordle_solver::Rank::ExpectedInformation,
+    };
+    if args.interactive {
+        play_interactive(solver.build());
+    } else {
+        play(move || solver.build(), args.games);
     }
 }
 
-fn play<G>(games: Option<usize>)
+fn play_interactive(mut guesser: impl Guesser) {
+    let mut history = Vec::with_capacity(6);
+    println!("C: Correct / Green, M: Misplaced / Yellow, W: Wrong / Gray");
+    // Wordle only allows six guesses.
+    for _ in 1..=6 {
+        let guess = guesser.guess(&history);
+        println!("Guess:  {}", guess.to_uppercase());
+        let correctness = {
+            loop {
+                match ask_for_correctness() {
+                    Ok(c) => break c,
+                    Err(e) => println!("{}", e),
+                }
+            }
+        };
+        if correctness == [wordle_solver::Correctness::Correct; 5] {
+            println!("The answer was {}", guess.to_uppercase());
+            return;
+        }
+        history.push(wordle_solver::Guess {
+            word: Cow::Owned(guess),
+            mask: correctness,
+        });
+    }
+    println!("Game Over, only six guesses are allowed");
+}
+
+fn ask_for_correctness() -> Result<[wordle_solver::Correctness; 5], Cow<'static, str>> {
+    print!("Colors: ");
+    std::io::Write::flush(&mut std::io::stdout()).unwrap();
+    let mut answer = String::with_capacity(7);
+    std::io::stdin().read_line(&mut answer).unwrap();
+    let answer = answer
+        .trim()
+        .chars()
+        .filter(|v| !v.is_whitespace())
+        .map(|v| v.to_ascii_uppercase())
+        .collect::<String>();
+    if answer.len() != 5 {
+        Err("You did not provide exactly 5 colors.")?;
+    }
+    let parsed = answer
+        .chars()
+        .map(|c| match c {
+            'C' => Ok(wordle_solver::Correctness::Correct),
+            'M' => Ok(wordle_solver::Correctness::Misplaced),
+            'W' => Ok(wordle_solver::Correctness::Wrong),
+            _ => Err(format!(
+                "The guess color '{c}' wasn't recognized: use C/M/W"
+            )),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(parsed
+        .try_into()
+        .expect("The parsed correctness is checked to be 5 items long"))
+}
+
+fn play<G>(mut mk: impl FnMut() -> G, max: Option<usize>)
 where
-    G: Guesser + Default,
+    G: Guesser,
 {
     let w = wordle_solver::Wordle::new();
-    for answer in GAMES.split_whitespace().take(games.unwrap_or(usize::MAX)) {
-        let guesser = G::default();
+    let mut score = 0;
+    let mut games = 0;
+    let mut histogram = Vec::new();
+    for answer in GAMES.split_whitespace().take(max.unwrap_or(usize::MAX)) {
+        let guesser = (mk)();
         if let Some(s) = w.play(answer, guesser) {
-            println!("guessed '{}' in {}", &answer, s);
+            games += 1;
+            score += s;
+            if s >= histogram.len() {
+                histogram.extend(std::iter::repeat(0).take(s - histogram.len() + 1));
+            }
+            histogram[s] += 1;
+            // eprintln!("guessed '{}' in {}", answer, s);
         } else {
-            eprintln!("failed to guess.. exiting!");
+            eprintln!("failed to guess '{}'", answer);
         }
     }
+    let sum: usize = histogram.iter().sum();
+    for (score, count) in histogram.into_iter().enumerate().skip(1) {
+        let frac = count as f64 / sum as f64;
+        let w1 = (30.0 * frac).round() as usize;
+        let w2 = (30.0 * (1.0 - frac)).round() as usize;
+        eprintln!(
+            "{:>2}: {}{} ({})",
+            score,
+            "#".repeat(w1),
+            " ".repeat(w2),
+            count
+        );
+    }
+    eprintln!("average score: {:.4}", score as f64 / games as f64);
 }
