@@ -5,16 +5,58 @@ use std::borrow::Cow;
 static INITIAL: OnceCell<Vec<(&'static str, f64)>> = OnceCell::new();
 static PATTERNS: OnceCell<Vec<[Correctness; 5]>> = OnceCell::new();
 
-pub struct Sigmoid {
+pub struct Escore {
     remaining: Cow<'static, Vec<(&'static str, f64)>>,
     patterns: Cow<'static, Vec<[Correctness; 5]>>,
+    entropy: Vec<f64>,
 }
 
-impl Default for Sigmoid {
+impl Default for Escore {
     fn default() -> Self {
         Self::new()
     }
 }
+
+// This is an estimation function for how many _more_ guesses are needed given that `entropy`
+// entropy remains. It was constructed by iterative regression.
+//
+// First, I logged the observed remaining entropy + remaining guesses with an implementation that
+// just tries to maximize the -sum of the candidates (entropy-initial.dat). I then ran that through
+// logistical regression (see `escore-regress.r`). That gave
+//
+//   E[guesses] = entropy * 0.2592 + 1.3202
+//   E[guesses] = ln(entropy * 4.066 + 3.755)
+//   E[guesses] = e^(entropy * 0.1346 + 0.2210)
+//   E[guesses] = 1/(entropy * -0.07977 + 0.84147)
+//   E[guesses] = (entropy * 0.09177 + 1.13241)^2
+//   E[guesses] = sqrt(entropy * 1.151 + 1.954)
+//
+// and an average score of 3.7631.
+//
+// Then, I ran the E[score] algorithm using the E[guesses] function determined by each of the first
+// regressions, which gave the commented-out scores in the fn body below. I then proceeded with the
+// best candidate (ln), and re-ran the regression on it, which gave
+//
+//   E[guesses] = ln(entropy * 3.869 + 3.679)
+//
+// and an average score of 3.7176 (worse than the first estimate). Further iterations did not
+// change the parameters much, so I stuck with that last estimat.
+//
+// Below are also the formulas and average scores when using different regressions. Interestingly,
+// the regression that does the best also tends to overestimate the number of guesses remaining,
+// which causes the model to "go for the win" less often, and instead focus on "best information"
+// guesses.
+fn est_steps_left(entropy: f64) -> f64 {
+    // entropy * 0.2592 + 1.3202 // 3.7181
+    // (entropy * 4.066 + 3.755).ln() // 3.7172
+    // (entropy * 0.1346 + 0.2210).exp() // 3.7237
+    // 1.0 / (entropy * -0.07977 + 0.84147) // 3.7246
+    // (entropy * 0.09177 + 1.13241).powi(2) // 3.7176
+    // (entropy * 1.151 + 1.954).sqrt() // 3.7176
+    // (entropy * 3.869 + 3.679).ln() // 3.7176
+    (entropy * 3.870 + 3.679).ln() // 3.7176
+}
+const PRINT_ESTIMATION: bool = false;
 
 const L: f64 = 1.0;
 // How steep is the cut-off?
@@ -49,7 +91,7 @@ fn sigmoid(p: f64) -> f64 {
 }
 const PRINT_SIGMOID: bool = false;
 
-impl Sigmoid {
+impl Escore {
     pub fn new() -> Self {
         Self {
             remaining: Cow::Borrowed(INITIAL.get_or_init(|| {
@@ -75,6 +117,7 @@ impl Sigmoid {
                     .collect()
             })),
             patterns: Cow::Borrowed(PATTERNS.get_or_init(|| Correctness::patterns().collect())),
+            entropy: Vec::new(),
         }
     }
 }
@@ -82,11 +125,13 @@ impl Sigmoid {
 #[derive(Debug, Copy, Clone)]
 struct Candidate {
     word: &'static str,
-    goodness: f64,
+    e_score: f64,
 }
 
-impl Guesser for Sigmoid {
+impl Guesser for Escore {
     fn guess(&mut self, history: &[Guess]) -> String {
+        let score = history.len() as f64;
+
         if let Some(last) = history.last() {
             if matches!(self.remaining, Cow::Owned(_)) {
                 self.remaining
@@ -104,12 +149,23 @@ impl Guesser for Sigmoid {
         }
         if history.is_empty() {
             self.patterns = Cow::Borrowed(PATTERNS.get().unwrap());
+            // NOTE: I did a manual run with this commented out and it indeed produced "tares" as
+            // the first guess. It slows down the run by a lot though.
             return "tares".to_string();
         } else {
             assert!(!self.patterns.is_empty());
         }
 
         let remaining_p: f64 = self.remaining.iter().map(|&(_, p)| p).sum();
+        let remaining_entropy = -self
+            .remaining
+            .iter()
+            .map(|&(_, p)| {
+                let p = p / remaining_p;
+                p * p.log2()
+            })
+            .sum::<f64>();
+        self.entropy.push(remaining_entropy);
 
         let mut best: Option<Candidate> = None;
         let mut i = 0;
@@ -138,19 +194,16 @@ impl Guesser for Sigmoid {
                 .sum();
 
             let p_word = count as f64 / remaining_p as f64;
-            let entropy = -sum;
-            // TODO: this should be (minimizing):
-            // (p_word * (history.len() + 1)) + ((1 - p_word) * estimate_remaining_guesses(remaining_entropy))
-            // where remaining_entropy is the existing entropy - entropy
-            // and restimate_remaining_guesses is computed by regression over historical data
-            let goodness = p_word * entropy;
+            let e_info = -sum;
+            let e_score = p_word * (score + 1.0)
+                + (1.0 - p_word) * (score + est_steps_left(remaining_entropy - e_info));
             if let Some(c) = best {
-                // Is this one better?
-                if goodness > c.goodness {
-                    best = Some(Candidate { word, goodness });
+                // Which one gives us a lower (expected) score?
+                if e_score < c.e_score {
+                    best = Some(Candidate { word, e_score });
                 }
             } else {
-                best = Some(Candidate { word, goodness });
+                best = Some(Candidate { word, e_score });
             }
 
             i += 1;
@@ -159,5 +212,18 @@ impl Guesser for Sigmoid {
             }
         }
         best.unwrap().word.to_string()
+    }
+
+    fn finish(&self, guesses: usize) {
+        if PRINT_ESTIMATION {
+            for (i, &entropy) in self.entropy.iter().enumerate() {
+                // i == 0 is the entropy that was left _after_ guessing the first word.
+                // we want to print f(remaining entropy) -> number of guesses needed
+                // we know we ended up making `guesses` guesses, and we know this is the entropy after
+                // the (i+1)th guess, which means there are
+                let guesses_needed = guesses - (i + 1);
+                println!("{} {}", entropy, guesses_needed);
+            }
+        }
     }
 }

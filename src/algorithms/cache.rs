@@ -1,21 +1,54 @@
-use crate::{enumerate_mask, Correctness, Guess, Guesser, DICTIONARY, MAX_MASK_ENUM};
+use crate::{Correctness, Guess, Guesser, DICTIONARY, MAX_MASK_ENUM};
 use once_cell::sync::OnceCell;
+use once_cell::unsync::OnceCell as UnSyncOnceCell;
 use std::borrow::Cow;
+use std::cell::Cell;
+use std::num::NonZeroU8;
 
 static INITIAL: OnceCell<Vec<(&'static str, f64, usize)>> = OnceCell::new();
 static PATTERNS: OnceCell<Vec<[Correctness; 5]>> = OnceCell::new();
 
-// Attempted to use vec of vecs for compute cache, but was much slower
-static COMPUTES: OnceCell<(usize, Vec<OnceCell<u8>>)> = OnceCell::new();
+#[derive(Copy, Clone)]
+struct CacheValue(NonZeroU8);
 
-pub struct Cache {
-    remaining: Cow<'static, Vec<(&'static str, f64, usize)>>,
-    patterns: Cow<'static, Vec<[Correctness; 5]>>,
-    entropy: Vec<f64>,
-    computes: &'static (usize, Vec<OnceCell<u8>>),
+impl CacheValue {
+    fn new(val: u8) -> Self {
+        Self(NonZeroU8::new(val.wrapping_add(1)).unwrap())
+    }
+
+    fn get(&self) -> u8 {
+        self.0.get() - 1
+    }
+}
+
+const NUM_WORDS: usize = DICTIONARY.len();
+const CELL: Cell<Option<CacheValue>> = Cell::new(None);
+const ROW: [Cell<Option<CacheValue>>; NUM_WORDS] = [CELL; NUM_WORDS];
+
+struct Cache([[Cell<Option<CacheValue>>; NUM_WORDS]; NUM_WORDS]);
+impl Cache {
+    #[inline]
+    fn get(&self) -> &[[Cell<Option<CacheValue>>; NUM_WORDS]; NUM_WORDS] {
+        &self.0
+    }
 }
 
 impl Default for Cache {
+    fn default() -> Self {
+        Cache([ROW; NUM_WORDS])
+    }
+}
+thread_local! {
+    static COMPUTES: UnSyncOnceCell<Box<Cache >> = Default::default();
+}
+
+pub struct Cached {
+    remaining: Cow<'static, Vec<(&'static str, f64, usize)>>,
+    patterns: Cow<'static, Vec<[Correctness; 5]>>,
+    entropy: Vec<f64>,
+}
+
+impl Default for Cached {
     fn default() -> Self {
         Self::new()
     }
@@ -60,6 +93,7 @@ fn est_steps_left(entropy: f64) -> f64 {
     // (entropy * 3.869 + 3.679).ln() // 3.7176
     (entropy * 3.870 + 3.679).ln() // 3.7176
 }
+const PRINT_ESTIMATION: bool = false;
 
 const L: f64 = 1.0;
 // How steep is the cut-off?
@@ -94,23 +128,13 @@ fn sigmoid(p: f64) -> f64 {
 }
 const PRINT_SIGMOID: bool = false;
 
-impl Cache {
+impl Cached {
     pub fn new() -> Self {
         let remaining = Cow::Borrowed(INITIAL.get_or_init(|| {
-            let mut sum = 0;
-            let mut words = Vec::from_iter(DICTIONARY.lines().map(|line| {
-                let (word, count) = line
-                    .split_once(' ')
-                    .expect("every line is word + space + frequency");
-                let count: usize = count.parse().expect("every count is a number");
-                sum += count;
-                (word, count)
-            }));
-
-            words.sort_unstable_by_key(|&(_, count)| std::cmp::Reverse(count));
+            let sum: usize = DICTIONARY.iter().map(|(_, count)| count).sum();
 
             if PRINT_SIGMOID {
-                for &(word, count) in words.iter().rev() {
+                for &(word, count) in DICTIONARY.iter().rev() {
                     let p = count as f64 / sum as f64;
                     println!(
                         "{} {:.6}% -> {:.6}% ({})",
@@ -122,8 +146,9 @@ impl Cache {
                 }
             }
 
-            let words: Vec<_> = words
-                .into_iter()
+            let words: Vec<_> = DICTIONARY
+                .iter()
+                .copied()
                 .enumerate()
                 .map(|(idx, (word, count))| (word, sigmoid(count as f64 / sum as f64), idx))
                 .collect();
@@ -131,34 +156,34 @@ impl Cache {
             words
         }));
 
-        let dimension = remaining.len();
+        COMPUTES.with(|c| {
+            c.get_or_init(|| Box::default());
+        });
 
         Self {
             remaining,
             patterns: Cow::Borrowed(PATTERNS.get_or_init(|| Correctness::patterns().collect())),
             entropy: Vec::new(),
-            computes: COMPUTES
-                .get_or_init(|| (dimension, vec![Default::default(); dimension * dimension])),
         }
     }
 }
 
-fn cachable_enumeration(answer: &str, guess: &str) -> u8 {
-    enumerate_mask(&Correctness::compute(answer, guess)) as u8
-}
-
-fn get_row(
-    computes: &'static (usize, Vec<OnceCell<u8>>),
-    guess_idx: usize,
-) -> &'static [OnceCell<u8>] {
-    let (dimension, vec) = computes;
-    let start = guess_idx * dimension;
-    let end = start + dimension;
-    &vec[start..end]
-}
-
-fn get_enumeration(row: &[OnceCell<u8>], answer: &str, guess: &str, guess_idx: usize) -> u8 {
-    *row[guess_idx].get_or_init(|| cachable_enumeration(guess, &answer))
+#[inline]
+fn get_correctness_packed(
+    row: &[Cell<Option<CacheValue>>],
+    guess: &str,
+    answer: &str,
+    answer_idx: usize,
+) -> u8 {
+    let cell = &row[answer_idx];
+    match cell.get() {
+        Some(a) => a.get(),
+        None => {
+            let correctness = Correctness::pack(&Correctness::compute(answer, guess));
+            cell.set(Some(CacheValue::new(correctness)));
+            correctness
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -167,34 +192,37 @@ struct Candidate {
     e_score: f64,
 }
 
-impl Guesser for Cache {
+impl Guesser for Cached {
     fn guess(&mut self, history: &[Guess]) -> String {
         let score = history.len() as f64;
 
         if let Some(last) = history.last() {
-            let reference = enumerate_mask(&last.mask) as u8;
+            let reference = Correctness::pack(&last.mask);
             let last_idx = self
                 .remaining
                 .iter()
                 .find(|(word, _, _)| &*last.word == *word)
                 .unwrap()
                 .2;
-            let row = get_row(self.computes, last_idx);
-            if matches!(self.remaining, Cow::Owned(_)) {
-                self.remaining.to_mut().retain(|(word, _, word_idx)| {
-                    reference == get_enumeration(row, &last.word, word, *word_idx)
-                });
-            } else {
-                self.remaining = Cow::Owned(
-                    self.remaining
-                        .iter()
-                        .filter(|(word, _, word_idx)| {
-                            reference == get_enumeration(row, &last.word, word, *word_idx)
-                        })
-                        .copied()
-                        .collect(),
-                );
-            }
+            COMPUTES.with(|c| {
+                let row = &c.get().unwrap().get()[last_idx];
+                if matches!(self.remaining, Cow::Owned(_)) {
+                    self.remaining.to_mut().retain(|(word, _, word_idx)| {
+                        reference == get_correctness_packed(row, &last.word, word, *word_idx)
+                    });
+                } else {
+                    self.remaining = Cow::Owned(
+                        self.remaining
+                            .iter()
+                            .filter(|(word, _, word_idx)| {
+                                reference
+                                    == get_correctness_packed(row, &last.word, word, *word_idx)
+                            })
+                            .copied()
+                            .collect(),
+                    );
+                }
+            });
         }
         if history.is_empty() {
             self.patterns = Cow::Borrowed(PATTERNS.get().unwrap());
@@ -228,11 +256,14 @@ impl Guesser for Cache {
             // simultaneously by storing them in an array. We can do this since each candidate-word
             // pair deterministically produces only one mask.
             let mut totals = [0.0f64; MAX_MASK_ENUM];
-            let row = get_row(self.computes, word_idx);
-            for (candidate, count, candidate_idx) in &*self.remaining {
-                let idx = get_enumeration(row, &word, candidate, *candidate_idx);
-                totals[idx as usize] += count;
-            }
+
+            COMPUTES.with(|c| {
+                let row = &c.get().unwrap().get()[word_idx];
+                for (candidate, count, candidate_idx) in &*self.remaining {
+                    let idx = get_correctness_packed(row, word, candidate, *candidate_idx);
+                    totals[usize::from(idx)] += count;
+                }
+            });
 
             let sum: f64 = totals
                 .into_iter()
@@ -262,5 +293,18 @@ impl Guesser for Cache {
             }
         }
         best.unwrap().word.to_string()
+    }
+
+    fn finish(&self, guesses: usize) {
+        if PRINT_ESTIMATION {
+            for (i, &entropy) in self.entropy.iter().enumerate() {
+                // i == 0 is the entropy that was left _after_ guessing the first word.
+                // we want to print f(remaining entropy) -> number of guesses needed
+                // we know we ended up making `guesses` guesses, and we know this is the entropy after
+                // the (i+1)th guess, which means there are
+                let guesses_needed = guesses - (i + 1);
+                println!("{} {}", entropy, guesses_needed);
+            }
+        }
     }
 }

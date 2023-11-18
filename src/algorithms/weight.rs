@@ -16,16 +16,8 @@ impl Default for Weight {
 
 impl Weight {
     pub fn new() -> Self {
-        Weight {
-            remaining: Cow::Borrowed(INITIAL.get_or_init(|| {
-                Vec::from_iter(DICTIONARY.lines().map(|line| {
-                    let (word, count) = line
-                        .split_once(' ')
-                        .expect("Every line is a word and a count");
-                    let count: usize = count.parse().expect("every count is a number");
-                    (word, count)
-                }))
-            })),
+        Self {
+            remaining: Cow::Borrowed(INITIAL.get_or_init(|| DICTIONARY.to_vec())),
         }
     }
 }
@@ -38,7 +30,6 @@ struct Candidate {
 
 impl Guesser for Weight {
     fn guess(&mut self, history: &[Guess]) -> String {
-        // prune the dictionary by only keeping words that could be a possible match
         if let Some(last) = history.last() {
             if matches!(self.remaining, Cow::Owned(_)) {
                 self.remaining
@@ -51,34 +42,24 @@ impl Guesser for Weight {
                         .filter(|(word, _)| last.matches(word))
                         .copied()
                         .collect(),
-                )
+                );
             }
         }
-
-        // hardcode the first guess to "tares"
         if history.is_empty() {
             return "tares".to_string();
         }
 
-        // the sum of the counts of all the remaining words in the dictionary
-        let remaining_count: usize = self.remaining.iter().map(|(_, c)| c).sum();
-        // the best word
+        let remaining_count: usize = self.remaining.iter().map(|&(_, c)| c).sum();
+
         let mut best: Option<Candidate> = None;
-
-        for &(word, count_out) in &*self.remaining {
+        for &(word, count) in &*self.remaining {
             let mut sum = 0.0;
-
+            let mut self_total_count = 0usize;
             for pattern in Correctness::patterns() {
-                // total of the count(s) of words that match a pattern
-                let mut in_pattern_total: usize = 0;
-
-                // given a particular candidate word, if we guess this word, what
-                // are the probabilities of getting each pattern. We sum together all those
-                // probabilities and use that to determine the entropy information amount from
-                // guessing that word
+                // considering a world where we _did_ guess `word` and got `pattern` as the
+                // correctness. now, compute what _then_ is left.
+                let mut in_pattern_total = 0;
                 for (candidate, count) in &*self.remaining {
-                    // considering a "world" where we did guess "word" and got "pattern" as the
-                    // correctness. Now compute what _then_ is left
                     let g = Guess {
                         word: Cow::Borrowed(word),
                         mask: pattern,
@@ -90,19 +71,24 @@ impl Guesser for Weight {
                 if in_pattern_total == 0 {
                     continue;
                 }
-                let prob_of_this_pattern = in_pattern_total as f64 / remaining_count as f64;
-                sum += prob_of_this_pattern * prob_of_this_pattern.log2()
+                self_total_count += in_pattern_total;
+
+                // TODO: apply sigmoid
+                let p_of_this_pattern = in_pattern_total as f64 / remaining_count as f64;
+                sum += p_of_this_pattern * p_of_this_pattern.log2();
             }
 
-            let p_word = count_out as f64 / remaining_count as f64;
-            let goodness = p_word * -sum;
+            debug_assert_eq!(self_total_count, remaining_count, "{}", word);
 
+            let p_word = count as f64 / remaining_count as f64;
+            let goodness = p_word * -sum;
             if let Some(c) = best {
+                // Is this one better?
                 if goodness > c.goodness {
-                    best = Some(Candidate { word, goodness })
+                    best = Some(Candidate { word, goodness });
                 }
             } else {
-                best = Some(Candidate { word, goodness })
+                best = Some(Candidate { word, goodness });
             }
         }
         best.unwrap().word.to_string()

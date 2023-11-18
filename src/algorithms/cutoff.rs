@@ -1,4 +1,4 @@
-use crate::{enumerate_mask, Correctness, Guess, Guesser, DICTIONARY, MAX_MASK_ENUM};
+use crate::{Correctness, Guess, Guesser, DICTIONARY, MAX_MASK_ENUM};
 use once_cell::sync::OnceCell;
 use std::borrow::Cow;
 
@@ -19,18 +19,7 @@ impl Default for Cutoff {
 impl Cutoff {
     pub fn new() -> Self {
         Self {
-            remaining: Cow::Borrowed(INITIAL.get_or_init(|| {
-                let mut words = Vec::from_iter(DICTIONARY.lines().map(|line| {
-                    let (word, count) = line
-                        .split_once(' ')
-                        .expect("Every line is a word and a count");
-                    let count: usize = count.parse().expect("every count is a number");
-                    // TODO: apply sigmoid to counts
-                    (word, count)
-                }));
-                words.sort_unstable_by_key(|&(_, count)| std::cmp::Reverse(count));
-                words
-            })),
+            remaining: Cow::Borrowed(INITIAL.get_or_init(|| DICTIONARY.to_vec())),
             patterns: Cow::Borrowed(PATTERNS.get_or_init(|| Correctness::patterns().collect())),
         }
     }
@@ -44,7 +33,6 @@ struct Candidate {
 
 impl Guesser for Cutoff {
     fn guess(&mut self, history: &[Guess]) -> String {
-        // Cutoff the dictionary by only keeping words that could be a possible match
         if let Some(last) = history.last() {
             if matches!(self.remaining, Cow::Owned(_)) {
                 self.remaining
@@ -60,8 +48,6 @@ impl Guesser for Cutoff {
                 );
             }
         }
-
-        // hardcode the first guess to "tares"
         if history.is_empty() {
             self.patterns = Cow::Borrowed(PATTERNS.get().unwrap());
             return "tares".to_string();
@@ -69,13 +55,12 @@ impl Guesser for Cutoff {
             assert!(!self.patterns.is_empty());
         }
 
-        // the sum of the counts of all the remaining words in the dictionary
-        let remaining_count: usize = self.remaining.iter().map(|(_, c)| c).sum();
-        // the best word
+        let remaining_count: usize = self.remaining.iter().map(|&(_, c)| c).sum();
+
         let mut best: Option<Candidate> = None;
         let mut i = 0;
         let stop = (self.remaining.len() / 3).max(20);
-        for &(word, count_out) in &*self.remaining {
+        for &(word, count) in &*self.remaining {
             // considering a world where we _did_ guess `word` and got `pattern` as the
             // correctness. now, compute what _then_ is left.
 
@@ -85,8 +70,8 @@ impl Guesser for Cutoff {
             // pair deterministically produces only one mask.
             let mut totals = [0usize; MAX_MASK_ENUM];
             for (candidate, count) in &*self.remaining {
-                let idx = enumerate_mask(&Correctness::compute(candidate, word));
-                totals[idx] += count;
+                let idx = Correctness::pack(&Correctness::compute(candidate, word));
+                totals[usize::from(idx)] += count;
             }
 
             assert_eq!(totals.iter().sum::<usize>(), remaining_count, "{}", word);
@@ -101,11 +86,15 @@ impl Guesser for Cutoff {
                 })
                 .sum();
 
-            let p_word = count_out as f64 / remaining_count as f64;
+            let p_word = count as f64 / remaining_count as f64;
             let entropy = -sum;
+            // TODO: this should be (minimizing):
+            // (p_word * (history.len() + 1)) + ((1 - p_word) * estimate_remaining_guesses(remaining_entropy))
+            // where remaining_entropy is the existing entropy - entropy
+            // and restimate_remaining_guesses is computed by regression over historical data
             let goodness = p_word * entropy;
-
             if let Some(c) = best {
+                // Is this one better?
                 if goodness > c.goodness {
                     best = Some(Candidate { word, goodness });
                 }
