@@ -1,6 +1,6 @@
-use crate::{Correctness, Guess, Guesser, DICTIONARY};
+use crate::{enumerate_mask, Correctness, Guess, Guesser, DICTIONARY, MAX_MASK_ENUM};
 use once_cell::sync::OnceCell;
-use std::{borrow::Cow, cmp::Reverse};
+use std::borrow::Cow;
 
 static INITIAL: OnceCell<Vec<(&'static str, usize)>> = OnceCell::new();
 static PATTERNS: OnceCell<Vec<[Correctness; 5]>> = OnceCell::new();
@@ -19,9 +19,10 @@ impl Cutoff {
                         .split_once(' ')
                         .expect("Every line is a word and a count");
                     let count: usize = count.parse().expect("every count is a number");
+                    // TODO: apply sigmoid to counts
                     (word, count)
                 }));
-                words.sort_unstable_by_key(|&(_, count)| Reverse(count));
+                words.sort_unstable_by_key(|&(_, count)| std::cmp::Reverse(count));
                 words
             })),
             patterns: Cow::Borrowed(PATTERNS.get_or_init(|| Correctness::patterns().collect())),
@@ -50,7 +51,7 @@ impl Guesser for Cutoff {
                         .filter(|(word, _)| last.matches(word))
                         .copied()
                         .collect(),
-                )
+                );
             }
         }
 
@@ -67,48 +68,32 @@ impl Guesser for Cutoff {
         // the best word
         let mut best: Option<Candidate> = None;
         let mut i = 0;
-        let stop = (self.remaining.len() / 3).max(16);
+        let stop = (self.remaining.len() / 3).max(20);
         for &(word, count_out) in &*self.remaining {
-            let mut sum = 0.0;
+            // considering a world where we _did_ guess `word` and got `pattern` as the
+            // correctness. now, compute what _then_ is left.
 
-            let check_pattern = |pattern: &[Correctness; 5]| {
-                // total of the count(s) of words that match a pattern
-                let mut in_pattern_total: usize = 0;
-
-                // given a particular candidate word, if we guess this word, what
-                // are the probabilities of getting each pattern. We sum together all those
-                // probabilities and use that to determine the entropy information amount from
-                // guessing that word
-                let g = Guess {
-                    word: Cow::Borrowed(word),
-                    mask: *pattern,
-                };
-                for (candidate, count) in &*self.remaining {
-                    // considering a "world" where we did guess "word" and got "pattern" as the
-                    // correctness. Now compute what _then_ is left
-                    if g.matches(candidate) {
-                        in_pattern_total += count;
-                    }
-                }
-                if in_pattern_total == 0 {
-                    return false;
-                }
-                let prob_of_this_pattern = in_pattern_total as f64 / remaining_count as f64;
-                sum += prob_of_this_pattern * prob_of_this_pattern.log2();
-                return true;
-            };
-
-            if matches!(self.patterns, Cow::Owned(_)) {
-                self.patterns.to_mut().retain(check_pattern);
-            } else {
-                self.patterns = Cow::Owned(
-                    self.patterns
-                        .iter()
-                        .copied()
-                        .filter(check_pattern)
-                        .collect(),
-                );
+            // Rather than iterate over the patterns sequentially and add up the counts of words
+            // that result in that pattern, we can instead keep a running total for each pattern
+            // simultaneously by storing them in an array. We can do this since each candidate-word
+            // pair deterministically produces only one mask.
+            let mut totals = [0usize; MAX_MASK_ENUM];
+            for (candidate, count) in &*self.remaining {
+                let idx = enumerate_mask(&Correctness::compute(candidate, word));
+                totals[idx] += count;
             }
+
+            assert_eq!(totals.iter().sum::<usize>(), remaining_count, "{}", word);
+
+            let sum: f64 = totals
+                .into_iter()
+                .filter(|t| *t != 0)
+                .map(|t| {
+                    // TODO: apply sigmoid
+                    let p_of_this_pattern = t as f64 / remaining_count as f64;
+                    p_of_this_pattern * p_of_this_pattern.log2()
+                })
+                .sum();
 
             let p_word = count_out as f64 / remaining_count as f64;
             let entropy = -sum;
@@ -116,14 +101,14 @@ impl Guesser for Cutoff {
 
             if let Some(c) = best {
                 if goodness > c.goodness {
-                    best = Some(Candidate { word, goodness })
+                    best = Some(Candidate { word, goodness });
                 }
             } else {
-                best = Some(Candidate { word, goodness })
+                best = Some(Candidate { word, goodness });
             }
 
             i += 1;
-            if i > stop {
+            if i >= stop {
                 break;
             }
         }
