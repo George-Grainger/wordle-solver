@@ -51,7 +51,7 @@ pub enum Correctness {
     Correct,
     /// Yellow
     Misplaced,
-    /// Missing
+    /// Grey
     Wrong,
 }
 
@@ -59,32 +59,23 @@ impl Correctness {
     fn compute(answer: &str, guess: &str) -> [Self; 5] {
         assert_eq!(answer.len(), 5);
         assert_eq!(guess.len(), 5);
-
         let mut c = [Correctness::Wrong; 5];
-        let mut used = [false; 5];
+        let answer_bytes = answer.as_bytes();
+        let guess_bytes = guess.as_bytes();
 
-        // Mark things green
-        for (i, (a, g)) in answer.bytes().zip(guess.bytes()).enumerate() {
-            if a == g {
+        for (i, &a) in answer_bytes.iter().enumerate() {
+            if a == guess_bytes[i] {
+                // Mark things green
                 c[i] = Correctness::Correct;
-                used[i] = true;
-            }
-        }
-        for (i, g) in guess.bytes().enumerate() {
-            if c[i] == Correctness::Correct {
-                // Already marked as green
-                continue;
-            }
-            if answer.bytes().enumerate().any(|(j, a)| {
-                if a == g && !used[j] {
-                    used[j] = true;
-                    return true;
-                }
-                false
+            } else if let Some(j) = guess_bytes.iter().enumerate().position(|(j, &g)| {
+                // The position in guess can only be marked as Misplaced, if it isn't Correct and wasn't already marked before.
+                a == g && answer_bytes[j] != a && c[j] == Correctness::Wrong
             }) {
-                c[i] = Correctness::Misplaced;
+                // Mark things yellow
+                c[j] = Correctness::Misplaced;
             }
         }
+
         c
     }
 

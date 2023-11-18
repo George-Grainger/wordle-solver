@@ -79,13 +79,13 @@ impl Guesser for Cutoff {
                 // are the probabilities of getting each pattern. We sum together all those
                 // probabilities and use that to determine the entropy information amount from
                 // guessing that word
+                let g = Guess {
+                    word: Cow::Borrowed(word),
+                    mask: *pattern,
+                };
                 for (candidate, count) in &*self.remaining {
                     // considering a "world" where we did guess "word" and got "pattern" as the
                     // correctness. Now compute what _then_ is left
-                    let g = Guess {
-                        word: Cow::Borrowed(word),
-                        mask: *pattern,
-                    };
                     if g.matches(candidate) {
                         in_pattern_total += count;
                     }
@@ -111,7 +111,8 @@ impl Guesser for Cutoff {
             }
 
             let p_word = count_out as f64 / remaining_count as f64;
-            let goodness = p_word * -sum;
+            let entropy = -sum;
+            let goodness = p_word * entropy;
 
             if let Some(c) = best {
                 if goodness > c.goodness {
