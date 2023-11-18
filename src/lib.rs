@@ -56,16 +56,6 @@ pub enum Correctness {
 }
 
 impl Correctness {
-    fn is_misplaced(letter: u8, answer: &str, used: &mut [bool; 5]) -> bool {
-        answer.bytes().enumerate().any(|(i, a)| {
-            if a == letter && !used[i] {
-                used[i] = true;
-                return true;
-            }
-            false
-        })
-    }
-
     fn compute(answer: &str, guess: &str) -> [Self; 5] {
         assert_eq!(answer.len(), 5);
         assert_eq!(guess.len(), 5);

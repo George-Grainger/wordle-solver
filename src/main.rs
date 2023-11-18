@@ -20,6 +20,7 @@ struct Args {
 enum Implementation {
     Unoptimised,
     Allocs,
+    Vecrem,
 }
 
 fn main() {
@@ -27,6 +28,7 @@ fn main() {
     match args.implementation {
         Implementation::Unoptimised => play(wordle_solver::algorithms::Unoptimised::new, args.max),
         Implementation::Allocs => play(wordle_solver::algorithms::Allocs::new, args.max),
+        Implementation::Vecrem => play(wordle_solver::algorithms::Vecrem::new, args.max),
     }
 }
 
