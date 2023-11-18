@@ -26,6 +26,8 @@ enum Implementation {
     Weight,
     Prune,
     Cutoff,
+    Enumerate,
+    Popular,
 }
 
 fn main() {
@@ -39,6 +41,8 @@ fn main() {
         Implementation::Weight => play(wordle_solver::algorithms::Weight::new, args.max),
         Implementation::Prune => play(wordle_solver::algorithms::Prune::new, args.max),
         Implementation::Cutoff => play(wordle_solver::algorithms::Cutoff::new, args.max),
+        Implementation::Enumerate => play(wordle_solver::algorithms::Enumerate::new, args.max),
+        Implementation::Popular => play(wordle_solver::algorithms::Popular::new, args.max),
     }
 }
 
