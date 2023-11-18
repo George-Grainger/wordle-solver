@@ -52,13 +52,9 @@ where
     G: Guesser + Default,
 {
     let w = wordle_solver::Wordle::new();
-    let mut score = 0;
-    let mut played = 0;
     for answer in GAMES.split_whitespace().take(games.unwrap_or(usize::MAX)) {
         let guesser = G::default();
         if let Some(s) = w.play(answer, guesser) {
-            played += 1;
-            score += s;
             println!("guessed '{}' in {}", &answer, s);
         } else {
             eprintln!("failed to guess.. exiting!");
