@@ -5,9 +5,6 @@ use wordle_solver::{Guesser, Solver};
 
 const GAMES: &str = include_str!("../answers.txt");
 
-#[global_allocator]
-static GLOBAL_ALLOC: mimalloc::MiMalloc = mimalloc::MiMalloc;
-
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]

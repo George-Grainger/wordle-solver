@@ -161,7 +161,7 @@ impl Options {
     pub fn build(self) -> Solver {
         let remaining = if self.sigmoid {
             INITIAL_SIGMOID.get_or_init(|| {
-                let sum: usize = DICTIONARY.iter().map(|(_, count)| count).sum();
+                let sum: u64 = DICTIONARY.iter().map(|(_, count)| count).sum();
 
                 if PRINT_SIGMOID {
                     for &(word, count) in DICTIONARY.iter().rev() {

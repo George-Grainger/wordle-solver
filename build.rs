@@ -12,14 +12,14 @@ fn main() {
         let (word, count) = line
             .split_once(' ')
             .expect("every line is word + space + frequency");
-        let count: usize = count.parse().expect("every count is a number");
+        let count: u64 = count.parse().expect("every count is a number");
         (word, count)
     }));
     words.sort_unstable_by_key(|&(_, count)| std::cmp::Reverse(count));
 
     writeln!(
         f,
-        "pub const DICTIONARY: [(&str, usize); {}] = [",
+        "pub const DICTIONARY: [(&str, u64); {}] = [",
         words.len()
     )
     .unwrap();
